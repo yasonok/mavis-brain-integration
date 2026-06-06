@@ -11,12 +11,15 @@ hermes --version
 # 2. Make sure Tailscale is connected and you can reach the NAS
 curl -s http://100.76.149.19:5188/   # should print {"status":"running"...}
 
-# 3. Run the installer
-curl -sSL https://raw.githubusercontent.com/yasonok/mavis-brain-integration/main/install.sh | bash
+# 3. Clone and install (two lines, no PAT needed if Tailscale SSH is set up)
+git clone https://github.com/yasonok/mavis-brain-integration.git
+cd mavis-brain-integration && ./install.sh
 
 # 4. Verify
 hermes-with-brain "what do you know about me?"
 ```
+
+> **One-liner alternative** (if you trust the repo): `git clone https://github.com/yasonok/mavis-brain-integration.git && cd mavis-brain-integration && bash install.sh`
 
 ## What the installer does
 
