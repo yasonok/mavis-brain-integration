@@ -14,100 +14,59 @@ Two separate hook systems run in Hermes. **Don't confuse them** — they have di
 | Test command | **None exposed** — `hermes hooks test` only tests System B (shell hooks). The "official" test for gateway hooks is "send a Telegram message, check the log file you write in handler.py" |
 | Allowlist | First-use consent allowlist at `~/.hermes/shell-hooks-allowlist.json` (only for System B; gateway hooks are pre-trusted once `HOOK.yaml` is in `~/.hermes/hooks/`) |
 
-## System B: Shell hooks (config.yaml)
+## System B: Shell hooks (per-call transformation)
 
 | Aspect | Detail |
 |---|---|
-| Lives in | `~/.hermes/config.yaml` under `hooks:` key |
-| Fires from | Both CLI and gateway |
-| Restart to load | New session (`/reset`) |
-| Test command | `hermes hooks test <event>` — e.g. `hermes hooks test on_session_end` |
-| Allowlist | Same `~/.hermes/shell-hooks-allowlist.json` (consented on first use) |
+| Lives in | `hooks:` block of `~/.hermes/config.yaml` |
+| Fires from | CLI + Gateway (every shell call) |
+| Restart to load | `hermes gateway restart` |
+| Test command | `hermes hooks test <event>` — works! |
+| Allowlist | First-use consent (config shell scripts need user OK first time) |
 
-## Event name catalogue (from `hermes hooks test` output)
+## Real event names (verified 2026-06-07)
 
-These are the events **System B** accepts (System A accepts a different set; see below):
+Gateway emits these via `self.hooks.emit(...)` (grep for `await self.hooks.emit` in `gateway/run.py`):
 
-```
-api_request_error
-on_session_end
-on_session_finalize
-on_session_reset
-on_session_start
-post_api_request
-post_approval_response
-post_llm_call
-post_tool_call
-pre_api_request
-pre_approval_request
-pre_gateway_dispatch
-pre_llm_call
-pre_tool_call
-subagent_start
-subagent_stop
-transform_llm_output
-transform_terminal_output
-transform_tool_result
-```
+| Event | When | Use case |
+|---|---|---|
+| `agent:start` | At the start of an agent run inside the gateway | Log "user X started session Y" |
+| `agent:step` | After each tool call | Per-tool audit |
+| `agent:end` | After the agent produces its final response | **Best for "extract on session end" hooks** like Brain sync |
+| `pre_gateway_dispatch` | Before platform-specific dispatch | Intercept before Telegram/Slack/Discord sends |
+| `post_gateway_dispatch` | After dispatch | Log/track outbound messages |
+| `subagent_start` / `subagent_stop` | Around delegate_task children | Subagent audit |
+| `pre_tool_call` / `post_tool_call` | Per tool (interception, audit) | Tool guardrails |
 
-## System A event names (from `gateway/run.py`)
+**Note**: `on_session_end` is **only** valid in the *plugin* hook system (registered via `ctx.register_hook()` in a Python plugin), NOT in `HOOK.yaml` for gateway hooks. If you put `on_session_end` in `HOOK.yaml` the gateway will load the file but never fire it. Use `agent:end` instead.
 
-The gateway's actual emit sites use **non-prefixed** names. To find what's really emitted, grep the gateway source:
+## How to verify a gateway hook actually fires (2026-06-07)
 
-```bash
-grep -nE "self\.hooks\.emit\(" ~/.hermes/hermes-agent/gateway/run.py
-```
+`hermes hooks test` won't help (it only tests System B). The reliable end-to-end check is:
 
-Confirmed emits as of 2026-06-07:
-- `agent:end` — fired after the gateway finishes processing a response (this is the one you want for "save after every conversation")
-- `agent:start` — fired at the beginning (for "load context before answering")
-- Other events may exist; check the source rather than relying on the System B list
+1. Look at the gateway log for the load message:
+   ```
+   [hooks] Loaded hook '<your-hook-name>' for events: ['agent:end']
+   ```
+   If you see this, the hook is registered.
 
-## Common mistake: pasting System B event names into System A HOOK.yaml
+2. Trigger a session that goes **through the gateway**. The cleanest trigger is a Telegram message:
+   - Send a message to the bot
+   - The bot finishes responding
+   - Check the log file you wrote in `handler.py`
 
-```yaml
-# WRONG — System A's `on_session_end` will silently never fire
-events:
-  - on_session_end
+3. Confirm via your handler's own log:
+   - Write to `~/.hermes/logs/hooks/<your-hook-name>.log` from inside `handle()`
+   - `tail` it after a known gateway session ends
 
-# CORRECT — System A's emit site is `agent:end`
-events:
-  - agent:end
-```
+If the log file is empty after a real session, the hook is registered but **not firing**. Re-check:
+- Event name in `HOOK.yaml` is one of the verified names above
+- `hermes gateway restart` was run after creating the hook
+- The session went through the gateway (not `hermes chat` directly)
 
-The gateway loads the HOOK.yaml but the event never gets emitted under that name, so the hook is effectively dead. There is no warning. The only symptom is "nothing happens when sessions end."
+## Common errors
 
-## The 60-second diagnostic recipe for "why isn't my hook firing"
-
-```bash
-# 1. Is the hook loaded?
-hermes gateway restart
-tail -20 ~/.hermes/logs/gateway.log | grep -i hook
-# expect: [hooks] Loaded hook '<name>' for events: ['agent:end']
-
-# 2. Is the right event name in the HOOK.yaml?
-cat ~/.hermes/hooks/<name>/HOOK.yaml
-# confirm events: contains a name from gateway/run.py's emit sites
-
-# 3. Did the gateway see traffic?
-tail -50 ~/.hermes/logs/gateway.log | grep -iE "inbound message|response ready"
-# confirm sessions are actually happening
-
-# 4. Did the hook write to its log file?
-ls -la ~/.hermes/logs/hooks/ 2>/dev/null
-cat ~/.hermes/logs/hooks/<your-hook>.log 2>/dev/null
-# if empty, the hook handler ran but produced no output (or never ran)
-```
-
-## When to use which system
-
-| Use case | System |
-|---|---|
-| Save conversation to Brain after every Telegram message | A (gateway, `agent:end`) |
-| Auto-format dangerous shell commands before they run | B (shell, `pre_tool_call`) |
-| Add a fixed prefix to every LLM response | B (shell, `transform_llm_output`) |
-| Run on `hermes chat -q` one-shots too | B (shell) — System A skips CLI |
-| Need a Python handler with full async + log file | A (gateway) |
-| Just need a bash one-liner to fire on an event | B (shell, `~/.hermes/config.yaml`) |
-
-If your hook needs to fire on `hermes chat` CLI sessions, **only System B covers that path.**
+- ❌ `HOOK.yaml` with `events: on_session_end` → loads, never fires. Use `agent:end`.
+- ❌ `HOOK.yaml` with `events: agent:start` → works, but you wanted `agent:end` (different meaning).
+- ❌ `hermes hooks test agent:end` → "Unknown event" because the validator only knows System B events.
+- ❌ Test from `hermes chat -q "..."` → hook never runs (CLI bypasses gateway). Test from Telegram.

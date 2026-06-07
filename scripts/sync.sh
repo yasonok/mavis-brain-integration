@@ -7,6 +7,9 @@
 #   sync.sh extract "TEXT"           # LLM-extract facts from text, then add all
 #   sync.sh extract-stdin            # read text from stdin, extract + add
 #   sync.sh extract-session SESSION  # extract from hermes session log
+#   sync.sh recall "CONTEXT" [N]     # L3-9: 雙路徑查詢 (search + list + smart rank)
+#   sync.sh brain-stats              # L4-15: smart stats w/ forgetting curve
+#   sync.sh decay [N_DAYS]           # 列出會過期的記憶
 #   sync.sh search "QUERY" [N]       # keyword search
 #   sync.sh relevant "CONTEXT" [N]   # semantic search (synonym-expanded)
 #   sync.sh delete ID                # delete by id
@@ -17,16 +20,13 @@
 #   API_KEY    default: 0e627d44-61c4-4a7f-97e8-e9dd1a3c7a85
 #   USER_ID    default: jason
 #   DEVICE_ID  default: ryans-macbook-pro
-#
-# This script was authored as part of mavis-brain-integration skill.
-# Tested: 2026-06-06 against NAS @ 100.76.149.19:5188 (Synology DS220j,
-# Tailscale, 41+ memories). The API key here is a long-lived deployment
-# key (not a per-user secret) — Brain sits on a private tailnet.
 
 set -euo pipefail
 
 BRAIN_URL="${BRAIN_URL:-http://100.76.149.19:5188}"
-API_KEY="${API_KEY:-0e62...=shift || true
+API_KEY="${API_KEY:-0e627d44-61c4-4a7f-97e8-e9dd1a3c7a85}"
+USER_ID="${USER_ID:-jason}"
+DEVICE_ID="${DEVICE_ID:-ryans-macbook-pro}"
 
 # JSON-encode a string safely (no shell injection in content/queries)
 jenc() { python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().rstrip()))'; }
@@ -52,6 +52,9 @@ for m in results:
 "
 }
 
+cmd="${1:-help}"
+shift || true
+
 case "$cmd" in
   stats)
     curl -s -m 10 "$BRAIN_URL/brain/stats" \
@@ -67,7 +70,6 @@ case "$cmd" in
       | format_memories
     echo ""
     echo "ℹ️  Note: Brain sorts by relevance+recency, NOT strict newest-first."
-    echo "   A freshly-added memory may not appear in `pull` immediately."
     echo "   Use \`sync.sh search <unique-tag>\` to confirm it was written."
     ;;
 
@@ -91,8 +93,6 @@ case "$cmd" in
       }" | python3 -m json.tool
     ;;
 
-<<<<<<< HEAD
-=======
   extract)
     text="${1:-}"
     if [ -z "$text" ]; then
@@ -118,7 +118,45 @@ case "$cmd" in
     python3 "$SCRIPT_DIR/extract_facts.py" --from-session "$session"
     ;;
 
->>>>>>> b4811e5 (feat: M3 LLM auto-extraction + session-end auto-sync)
+  summarize)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/brain_smart.py" summarize \
+      --category "${1:-workflow}" --days "${2:-7}" --limit "${3:-10}"
+    ;;
+
+  conflict)
+    category="${1:-}"
+    new_fact="${2:-}"
+    if [ -z "$category" ] || [ -z "$new_fact" ]; then
+      echo "usage: $0 conflict CATEGORY \"NEW FACT\"" >&2
+      exit 1
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/brain_smart.py" conflict \
+      --category "$category" --new-fact "$new_fact"
+    ;;
+
+  recall)
+    context="${1:-}"
+    n="${2:-5}"
+    if [ -z "$context" ]; then
+      echo "usage: $0 recall \"CONTEXT\" [N]   # L3-9: 雙路徑查詢 (search + list + smart rank)" >&2
+      exit 1
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/brain_smart.py" search "$context" --limit "${n:-5}"
+    ;;
+
+  brain-stats)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/brain_smart.py" stats
+    ;;
+
+  decay)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/brain_smart.py" decay --days "${1:-30}"
+    ;;
+
   search)
     query="${1:-}"
     n="${2:-5}"
@@ -166,12 +204,14 @@ Mavis Brain sync (Hermes ↔ Synology NAS)
   $0 stats                    brain health + counts
   $0 pull [N]                 show N most recent memories
   $0 add "TEXT" [category]    write a new memory
-<<<<<<< HEAD
-=======
   $0 extract "TEXT"           LLM-extract facts, then add all (uses MiniMax M3)
   $0 extract-stdin            same, read text from stdin
   $0 extract-session SID      same, read from hermes session log
->>>>>>> b4811e5 (feat: M3 LLM auto-extraction + session-end auto-sync)
+  $0 recall "CONTEXT" [N]     smart search (search + list + client rank)
+  $0 brain-stats              smart stats w/ forgetting curve
+  $0 decay [N_DAYS]           show memories older than N days
+  $0 summarize [CAT] [DAYS] [N]   L4-14: M3 蒸餾老記憶成 meta-fact
+  $0 conflict CAT "NEW_FACT" L4-16: M3 比對新事實 vs 現有記憶
   $0 search "QUERY" [N]       keyword search
   $0 relevant "CONTEXT" [N]   semantic search (synonym-expanded)
   $0 delete ID                delete by id
