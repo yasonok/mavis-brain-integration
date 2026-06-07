@@ -29,10 +29,12 @@ import json
 import re
 import sys
 import urllib.request
+import argparse
 from datetime import datetime, timedelta
 
 BRAIN_URL = "http://100.76.149.19:5188"
-API_KEY=os.env...Y") or "0e627d44-61c4-4a7f-97e8-e9dd1a3c7a85"
+# 優先從 env 拿, 沒有就用 deployment key (在 .env 之外, 只用在 client)
+API_KEY = os.environ.get("BRAIN_API_KEY", "0e627d44-61c4-4a7f-97e8-e9dd1a3c7a85")
 USER_ID = "jason"
 DEVICE_ID = "ryans-macbook-pro"
 
