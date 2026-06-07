@@ -4,6 +4,9 @@
 #   sync.sh stats                    # brain health + counts
 #   sync.sh pull [N]                 # show N most recent memories (default 5)
 #   sync.sh add "TEXT" [category]    # write a new memory
+#   sync.sh extract "TEXT"           # LLM-extract facts from text, then add all
+#   sync.sh extract-stdin            # read text from stdin, extract + add
+#   sync.sh extract-session SESSION  # extract from hermes session log
 #   sync.sh search "QUERY" [N]       # keyword search
 #   sync.sh relevant "CONTEXT" [N]   # semantic search (synonym-expanded)
 #   sync.sh delete ID                # delete by id
@@ -88,6 +91,34 @@ case "$cmd" in
       }" | python3 -m json.tool
     ;;
 
+<<<<<<< HEAD
+=======
+  extract)
+    text="${1:-}"
+    if [ -z "$text" ]; then
+      echo "usage: $0 extract \"TEXT\"  (or use extract-stdin / extract-session)" >&2
+      exit 1
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/extract_facts.py" --text "$text"
+    ;;
+
+  extract-stdin)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/extract_facts.py" --stdin
+    ;;
+
+  extract-session)
+    session="${1:-}"
+    if [ -z "$session" ]; then
+      echo "usage: $0 extract-session SESSION_ID" >&2
+      exit 1
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    python3 "$SCRIPT_DIR/extract_facts.py" --from-session "$session"
+    ;;
+
+>>>>>>> b4811e5 (feat: M3 LLM auto-extraction + session-end auto-sync)
   search)
     query="${1:-}"
     n="${2:-5}"
@@ -135,6 +166,12 @@ Mavis Brain sync (Hermes ↔ Synology NAS)
   $0 stats                    brain health + counts
   $0 pull [N]                 show N most recent memories
   $0 add "TEXT" [category]    write a new memory
+<<<<<<< HEAD
+=======
+  $0 extract "TEXT"           LLM-extract facts, then add all (uses MiniMax M3)
+  $0 extract-stdin            same, read text from stdin
+  $0 extract-session SID      same, read from hermes session log
+>>>>>>> b4811e5 (feat: M3 LLM auto-extraction + session-end auto-sync)
   $0 search "QUERY" [N]       keyword search
   $0 relevant "CONTEXT" [N]   semantic search (synonym-expanded)
   $0 delete ID                delete by id
